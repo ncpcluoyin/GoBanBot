@@ -1,48 +1,94 @@
 #include <iostream>
 #include <memory>
+#include <limits>
 #include "game.h"
 #include "negamax_ai.h"
+#include "mcts_ai.h"
 
 using namespace std;
 
+void clearCin() {
+    cin.clear();
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+}
+
 int main() {
-    cout << "========== 五子棋 AI：GobanBot (模块化版) ==========" << endl;
-    cout << "玩家执 X，AI 执 O。棋盘大小 15x15。" << endl;
+    cout << "========== GobanBot Gomoku AI ==========" << endl;
+    cout << "Player: X, AI: O, Board: 15x15" << endl;
 
-    // 询问AI模型
-    cout << "请选择AI模型 (1: Negamax): ";
-    int modelChoice;
-    cin >> modelChoice;
-    if (modelChoice != 1) {
-        cout << "目前仅支持 Negamax 模型，将使用默认。" << endl;
-        modelChoice = 1;
+    int mode;
+    cout << "Select mode (1: Human vs AI, 2: AI vs AI): ";
+    cin >> mode;
+    if (mode != 1 && mode != 2) mode = 1;
+
+    // 创建两个AI的辅助函数
+    auto createAI = [](const string& prompt) -> unique_ptr<GomokuAI> {
+        int modelType;
+        cout << prompt << " model (1: Negamax, 2: MCTS+DNN): ";
+        cin >> modelType;
+        if (modelType == 1) {
+            int depth, threads;
+            cout << "Search depth: ";
+            cin >> depth;
+            cout << "Threads: ";
+            cin >> threads;
+            return make_unique<NegamaxAI>(depth, threads);
+        } else {
+            int sims, threads;
+            cout << "MCTS simulations: ";
+            cin >> sims;
+            cout << "Threads: ";
+            cin >> threads;
+            string weights;
+            cout << "Weights file (empty for random): ";
+            cin.ignore();
+            getline(cin, weights);
+            return make_unique<MCTSAI>(sims, threads, weights);
+        }
+    };
+
+    unique_ptr<GomokuAI> ai1, ai2;
+    bool humanFirst = false;
+    if (mode == 1) {
+        ai1 = createAI("Select AI");
+        int first;
+        cout << "Who goes first? (1: Player, 2: AI): ";
+        cin >> first;
+        humanFirst = (first == 1);
+    } else {
+        cout << "=== First AI (AI1) ===" << endl;
+        ai1 = createAI("AI1");
+        cout << "=== Second AI (AI2) ===" << endl;
+        ai2 = createAI("AI2");
     }
 
-    // 询问搜索深度
-    int depth;
-    cout << "请输入搜索深度 (推荐3或4): ";
-    cin >> depth;
+    bool highlight;
+    char ch;
+    cout << "Highlight last move? (y/n): ";
+    cin >> ch;
+    highlight = (ch == 'y' || ch == 'Y');
 
-    // 询问线程数量
-    int threads;
-    cout << "请输入线程数量 (建议1~8): ";
-    cin >> threads;
-    if (threads < 1) threads = 1;
-
-    // 创建AI实例
-    unique_ptr<GomokuAI> ai;
-    if (modelChoice == 1) {
-        ai = make_unique<NegamaxAI>(depth, threads);
+    if (mode == 1) {
+        Game game(move(ai1), nullptr, humanFirst, highlight);
+        game.run();
+    } else {
+        int numGames;
+        cout << "Number of games: ";
+        cin >> numGames;
+        char save;
+        cout << "Save PGN logs? (y/n): ";
+        cin >> save;
+        bool savePGN = (save == 'y' || save == 'Y');
+        char printBoard;
+        cout << "Print board after each move? (y/n): ";
+        cin >> printBoard;
+        bool printBoardEachMove = (printBoard == 'y' || printBoard == 'Y');
+        Game battle(move(ai1), move(ai2), false, highlight);
+        battle.runBattle(numGames, savePGN, printBoardEachMove);
     }
 
-    // 询问先手
-    int first;
-    cout << "请选择谁先手 (1: 玩家先手, 2: AI 先手): ";
-    cin >> first;
-    bool playerFirst = (first == 1);
-
-    Game game(move(ai), playerFirst);
-    game.run();
-
+    cout << "Press any key to exit..." << endl;
+    cin.ignore();
+    cin.get();
     return 0;
 }
