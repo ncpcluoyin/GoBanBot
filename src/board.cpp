@@ -138,7 +138,7 @@ void Board::updateZobrist(int x, int y, int oldPiece, int newPiece) {
 
 void Board::print(int lastPlayerX, int lastPlayerY, int lastAIX, int lastAIY,
                   const string& rightPanel) const {
-    cout << "\n    ";
+    cout << "\n     ";
     for (int j = 0; j < BOARD_SIZE; ++j) {
         cout << (j + 1) % 10 << " ";
     }
