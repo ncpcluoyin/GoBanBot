@@ -1,6 +1,13 @@
 #include "Board.h"
 #include <random>
 #include <cstring>
+#include <unordered_set>
+
+struct MoveHash {
+    size_t operator()(const Move& m) const {
+        return m.x * 31 + m.y;
+    }
+};
 
 uint64_t Board::zobristTable[Board::SIZE][Board::SIZE][2];
 bool Board::zobristInitialized = false;
@@ -107,7 +114,6 @@ bool Board::isForbidden(int x, int y) const {
 
     if (temp.isOverline(x, y)) return true;
 
-    // 简化双三双四检测（保持与之前一致）
     int threeCount = 0, fourCount = 0;
     const int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
     for (auto& d : dirs) {
@@ -129,20 +135,51 @@ bool Board::isForbidden(int x, int y) const {
     return (fourCount >= 2 || threeCount >= 2);
 }
 
-std::vector<Move> Board::generateLegalMoves(bool includeForbidden) const {
+std::vector<Move> Board::generateLegalMoves(bool includeForbidden, bool onlyNearby, int radius) const {
     std::vector<Move> moves;
-    for (int i = 0; i < SIZE; ++i)
+    if (!onlyNearby) {
+        for (int i = 0; i < SIZE; ++i)
+            for (int j = 0; j < SIZE; ++j) {
+                if (board[i][j] != EMPTY) continue;
+                if (!includeForbidden && isForbidden(i, j)) continue;
+                moves.emplace_back(i, j);
+            }
+        return moves;
+    }
+
+    std::unordered_set<Move, MoveHash> candidates;
+    for (int i = 0; i < SIZE; ++i) {
         for (int j = 0; j < SIZE; ++j) {
-            if (board[i][j] != EMPTY) continue;
-            if (!includeForbidden && isForbidden(i, j)) continue;
-            moves.emplace_back(i, j);
+            if (board[i][j] == EMPTY) continue;
+            for (int dx = -radius; dx <= radius; ++dx) {
+                for (int dy = -radius; dy <= radius; ++dy) {
+                    int nx = i + dx, ny = j + dy;
+                    if (inBoard(nx, ny) && board[nx][ny] == EMPTY) {
+                        candidates.insert(Move(nx, ny));
+                    }
+                }
+            }
         }
+    }
+
+    if (candidates.empty()) {
+        int center = SIZE / 2;
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy) {
+                int nx = center + dx, ny = center + dy;
+                if (inBoard(nx, ny)) candidates.insert(Move(nx, ny));
+            }
+    }
+
+    for (const Move& m : candidates) {
+        if (!includeForbidden && isForbidden(m.x, m.y)) continue;
+        moves.push_back(m);
+    }
     return moves;
 }
 
-// 棋型分值常量
+// 评估函数实现
 namespace {
-    const int SCORE_FIVE      = 1000000;  // 实际在搜索中捕获，这里不用
     const int SCORE_OPEN_FOUR = 100000;
     const int SCORE_FOUR      = 10000;
     const int SCORE_OPEN_THREE= 5000;
@@ -154,42 +191,32 @@ namespace {
 int Board::evaluateColor(int stone) const {
     if (stone == EMPTY) return 0;
     int totalScore = 0;
-
-    // 四个方向向量
     const int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
-
-    // 为避免重复计算同一连线，使用一个标记数组
     bool visited[SIZE][SIZE][4] = {false};
 
     for (int x = 0; x < SIZE; ++x) {
         for (int y = 0; y < SIZE; ++y) {
             if (board[x][y] != stone) continue;
-
             for (int d = 0; d < 4; ++d) {
                 if (visited[x][y][d]) continue;
-
                 int dx = dirs[d][0], dy = dirs[d][1];
 
-                // 正向计数连续同色棋子
                 int count = 1;
                 int nx = x + dx, ny = y + dy;
                 while (inBoard(nx, ny) && board[nx][ny] == stone) {
                     ++count;
-                    nx += dx;
-                    ny += dy;
+                    nx += dx; ny += dy;
                 }
                 bool openEnd1 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
 
-                // 反向计数
                 nx = x - dx; ny = y - dy;
                 while (inBoard(nx, ny) && board[nx][ny] == stone) {
                     ++count;
-                    nx -= dx;
-                    ny -= dy;
+                    nx -= dx; ny -= dy;
                 }
                 bool openEnd2 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
 
-                // 标记该线上所有同色棋子已访问
+                // 标记已访问
                 int tx = x, ty = y;
                 while (inBoard(tx, ty) && board[tx][ty] == stone) {
                     visited[tx][ty][d] = true;
@@ -201,16 +228,9 @@ int Board::evaluateColor(int stone) const {
                     tx -= dx; ty -= dy;
                 }
 
-                // 根据连子数和开放情况评分
-                if (count >= 5) {
-                    // 连五已在胜负判定中处理，这里不重复加分
-                    continue;
-                }
+                if (count >= 5) continue;
 
-                bool leftOpen = openEnd1;
-                bool rightOpen = openEnd2;
-                int openCount = (leftOpen ? 1 : 0) + (rightOpen ? 1 : 0);
-
+                int openCount = (openEnd1 ? 1 : 0) + (openEnd2 ? 1 : 0);
                 if (count == 4) {
                     if (openCount == 2) totalScore += SCORE_OPEN_FOUR;
                     else if (openCount >= 1) totalScore += SCORE_FOUR;
@@ -220,10 +240,7 @@ int Board::evaluateColor(int stone) const {
                 } else if (count == 2) {
                     if (openCount == 2) totalScore += SCORE_OPEN_TWO;
                     else if (openCount == 1) totalScore += SCORE_TWO;
-                } else if (count == 1) {
-                    // 单子不单独给分，避免噪声
                 }
-                // 对于更复杂棋型（如跳活三、跳冲四）可在此扩展，当前版本已具备基本强度
             }
         }
     }

@@ -26,19 +26,40 @@ void Game::setup() {
 
     highlight = yesNoPrompt("Enable last move highlight?");
 
-    int depthBlack = intPrompt("Enter search depth for Black (AI)", 2, 12);
-    aiBlack.setDepth(depthBlack);
+    if (mode == HUMAN_VS_AI) {
+        // 人类选择颜色
+        std::cout << "Choose your color:\n";
+        std::cout << "  B - Black (X, first)\n";
+        std::cout << "  W - White (O, second)\n";
+        char col;
+        while (true) {
+            std::cout << "Your choice (B/W): ";
+            std::cin >> col;
+            col = std::toupper(col);
+            if (col == 'B') {
+                humanSide = Board::BLACK;
+                break;
+            } else if (col == 'W') {
+                humanSide = Board::WHITE;
+                break;
+            }
+            std::cout << "Invalid choice. Please enter B or W.\n";
+        }
+        std::cout << "You play as " << (humanSide == Board::BLACK ? "Black (X)" : "White (O)") << ".\n";
+        std::cout << "AI plays as " << (humanSide == Board::BLACK ? "White (O)" : "Black (X)") << ".\n";
 
-    if (mode == AI_VS_AI) {
+        // 统一询问一个 AI 深度
+        int aiDepth = intPrompt("Enter AI search depth", 2, 12);
+        aiBlack.setDepth(aiDepth);
+        aiWhite.setDepth(aiDepth);
+    } else { // AI vs AI
+        int depthBlack = intPrompt("Enter search depth for Black (AI)", 2, 12);
+        aiBlack.setDepth(depthBlack);
         int depthWhite = intPrompt("Enter search depth for White (AI)", 2, 12);
         aiWhite.setDepth(depthWhite);
-    } else {
-        aiWhite.setDepth(depthBlack);
-        std::cout << "You play as Black (X). AI plays as White (O).\n";
-        humanSide = Board::BLACK;
     }
 
-    // 修改：不限制最大线程数，maxVal = -1 表示无上限
+    // 询问线程数（无上限）
     int threads = intPrompt("Enter number of search threads", 1, -1);
     aiBlack.setThreads(threads);
     aiWhite.setThreads(threads);
@@ -158,9 +179,13 @@ void Game::run() {
             if (board.getSide() == humanSide) {
                 humanTurn();
             } else {
-                aiTurn(aiWhite, "AI (White)");
+                // AI 走棋，根据当前颜色选择对应的 AI 对象
+                if (board.getSide() == Board::BLACK)
+                    aiTurn(aiBlack, "AI (Black)");
+                else
+                    aiTurn(aiWhite, "AI (White)");
             }
-        } else {
+        } else { // AI vs AI
             if (board.getSide() == Board::BLACK) {
                 aiTurn(aiBlack, "AI Black");
             } else {

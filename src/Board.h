@@ -19,10 +19,9 @@ public:
     static const int EMPTY = 0;
     static const int BLACK = 1;
     static const int WHITE = -1;
-    // 评估辅助：统计指定颜色的棋型得分（不包含连五，连五已在搜索中处理）
-    int evaluateColor(int color) const;
+
     Board();
-    Board(const Board& other) = default;  // 显式默认拷贝
+    Board(const Board& other) = default;
     Board& operator=(const Board& other) = default;
     void reset();
 
@@ -43,9 +42,16 @@ public:
     int checkWinner() const;
     bool isFull() const;
     bool isForbidden(int x, int y) const;
-    std::vector<Move> generateLegalMoves(bool includeForbidden = false) const;
+
+    // 唯一的生成着法接口：是否包含禁手，是否只生成邻近位置，半径
+    std::vector<Move> generateLegalMoves(bool includeForbidden = false, 
+                                         bool onlyNearby = true, 
+                                         int radius = 2) const;
 
     uint64_t zobrist() const { return hash; }
+
+    // 评估辅助
+    int evaluateColor(int stone) const;
 
 private:
     int board[SIZE][SIZE];
@@ -60,8 +66,6 @@ private:
     int countDirection(int x, int y, int dx, int dy, int stone) const;
     bool isFive(int x, int y, int stone) const;
     bool isOverline(int x, int y) const;
-    int countOpenFour(int x, int y) const;
-    int countOpenThree(int x, int y) const;
 };
 
 #endif
