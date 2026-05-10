@@ -66,6 +66,8 @@ private:
     int countDirection(int x, int y, int dx, int dy, int stone) const;
     bool isFive(int x, int y, int stone) const;
     bool isOverline(int x, int y) const;
+    bool isLiveThree(int x, int y, int dx, int dy) const;
+    int countFoursAt(int x, int y, int stone) const;
 };
 
 #endif

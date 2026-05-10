@@ -105,6 +105,79 @@ bool Board::isOverline(int x, int y) const {
     return false;
 }
 
+bool Board::isLiveThree(int x, int y, int dx, int dy) const {
+    // 在方向 (dx, dy) 上检查 (x, y) 是否参与构成活三（含跳活三）
+    for (int start = -4; start <= 0; ++start) {
+        int sx = x + dx * start;
+        int sy = y + dy * start;
+        int endx = sx + dx * 4;
+        int endy = sy + dy * 4;
+        if (!inBoard(sx, sy) || !inBoard(endx, endy)) continue;
+
+        int blackCount = 0, emptyCount = 0;
+        bool hasWhite = false, containsCenter = false;
+        for (int step = 0; step <= 4; ++step) {
+            int tx = sx + dx * step;
+            int ty = sy + dy * step;
+            int stone = board[tx][ty];
+            if (stone == BLACK) {
+                ++blackCount;
+                if (tx == x && ty == y) containsCenter = true;
+            } else if (stone == EMPTY) {
+                ++emptyCount;
+            } else {
+                hasWhite = true;
+                break;
+            }
+        }
+        if (!containsCenter || hasWhite) continue;
+        if (blackCount != 3 || emptyCount != 2) continue;
+
+        // 检查窗口外侧两端是否都为空（且在棋盘内）
+        int beforeX = sx - dx, beforeY = sy - dy;
+        int afterX = endx + dx, afterY = endy + dy;
+        if (inBoard(beforeX, beforeY) && board[beforeX][beforeY] == EMPTY &&
+            inBoard(afterX, afterY)  && board[afterX][afterY] == EMPTY)
+            return true;
+    }
+    return false;
+}
+
+int Board::countFoursAt(int x, int y, int stone) const {
+    int fourCount = 0;
+    const int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
+    for (auto& d : dirs) {
+        int dx = d[0], dy = d[1];
+        // 枚举包含 (x,y) 的所有可能 5 连线段
+        for (int start = 0; start < 5; ++start) {
+            int sx = x - dx * start;
+            int sy = y - dy * start;
+            int ex = sx + dx * 4;
+            int ey = sy + dy * 4;
+            if (!inBoard(sx, sy) || !inBoard(ex, ey)) continue;
+
+            int stoneCount = 0;
+            bool hasEmpty = false;
+            bool hasOpponent = false;
+            for (int step = 0; step < 5; ++step) {
+                int tx = sx + dx * step;
+                int ty = sy + dy * step;
+                int s = board[tx][ty];
+                if (s == stone) stoneCount++;
+                else if (s == EMPTY) {
+                    if (hasEmpty) { hasOpponent = true; break; }
+                    hasEmpty = true;
+                } else { hasOpponent = true; break; }
+            }
+            if (!hasOpponent && stoneCount == 4 && hasEmpty) {
+                fourCount++;
+                break;  // 该方向已找到一个四，不再重复计数
+            }
+        }
+    }
+    return fourCount;
+}
+
 bool Board::isForbidden(int x, int y) const {
     if (!inBoard(x, y) || board[x][y] != EMPTY) return true;
     if (side != BLACK) return false;
@@ -112,27 +185,27 @@ bool Board::isForbidden(int x, int y) const {
     Board temp = *this;
     temp.board[x][y] = BLACK;
 
+    // 形成五连时不禁手
+    if (temp.isFive(x, y, BLACK)) return false;
+
+    // 长连禁手
     if (temp.isOverline(x, y)) return true;
 
-    int threeCount = 0, fourCount = 0;
+    // 双三检测（含跳活三）
+    int threeCount = 0;
     const int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
     for (auto& d : dirs) {
-        int cnt1 = temp.countDirection(x, y, d[0], d[1], BLACK);
-        int cnt2 = temp.countDirection(x, y, -d[0], -d[1], BLACK);
-        int total = 1 + cnt1 + cnt2;
-
-        int nx1 = x + d[0] * (cnt1 + 1);
-        int ny1 = y + d[1] * (cnt1 + 1);
-        int nx2 = x - d[0] * (cnt2 + 1);
-        int ny2 = y - d[1] * (cnt2 + 1);
-        bool open1 = temp.inBoard(nx1, ny1) && temp.board[nx1][ny1] == EMPTY;
-        bool open2 = temp.inBoard(nx2, ny2) && temp.board[nx2][ny2] == EMPTY;
-
-        if (total == 4 && open1 && open2) fourCount++;
-        else if (total == 4 && (open1 || open2)) fourCount++;
-        if (total == 3 && open1 && open2) threeCount++;
+        if (temp.isLiveThree(x, y, d[0], d[1])) {
+            threeCount++;
+        }
     }
-    return (fourCount >= 2 || threeCount >= 2);
+    if (threeCount >= 2) return true;
+
+    // 双四检测（包含跳四）
+    int fourCount = temp.countFoursAt(x, y, BLACK);
+    if (fourCount >= 2) return true;
+
+    return false;
 }
 
 std::vector<Move> Board::generateLegalMoves(bool includeForbidden, bool onlyNearby, int radius) const {

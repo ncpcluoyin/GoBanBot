@@ -4,7 +4,9 @@ project(GoBanBot)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 多线程支持
+# 开启最高优化
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
 find_package(Threads REQUIRED)
 
 add_executable(GoBanBot
