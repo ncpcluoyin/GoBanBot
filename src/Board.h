@@ -53,6 +53,9 @@ public:
     // 评估辅助
     int evaluateColor(int stone) const;
 
+    // 检查当前走棋方是否存在合法着法（不含禁手）
+    bool hasLegalMoves() const;
+
 private:
     int board[SIZE][SIZE];
     Move lastMove;

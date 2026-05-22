@@ -150,9 +150,25 @@ void Game::checkGameOver(bool& over) {
     if (winner != Board::EMPTY) {
         over = true;
         announceResult(winner);
-    } else if (board.isFull()) {
+        return;
+    }
+
+    if (board.isFull()) {
         over = true;
         announceResult(Board::EMPTY);
+        return;
+    }
+
+    // 新增：当前走棋方无合法着法（仅黑方可能因禁手发生）
+    if (!board.hasLegalMoves()) {
+        over = true;
+        if (board.getSide() == Board::BLACK) {
+            std::cout << "Black has no legal move (all empty points are forbidden).\n";
+            announceResult(Board::WHITE);  // 黑负
+        } else {
+            // 白方无合法着法只会出现在棋盘全满时，上面已处理
+            announceResult(Board::EMPTY);  // 安全回退
+        }
     }
 }
 

@@ -209,8 +209,8 @@ bool Board::isForbidden(int x, int y) const {
 }
 
 std::vector<Move> Board::generateLegalMoves(bool includeForbidden, bool onlyNearby, int radius) const {
-    std::vector<Move> moves;
     if (!onlyNearby) {
+        std::vector<Move> moves;
         for (int i = 0; i < SIZE; ++i)
             for (int j = 0; j < SIZE; ++j) {
                 if (board[i][j] != EMPTY) continue;
@@ -220,6 +220,7 @@ std::vector<Move> Board::generateLegalMoves(bool includeForbidden, bool onlyNear
         return moves;
     }
 
+    // 邻近生成（原逻辑不变）
     std::unordered_set<Move, MoveHash> candidates;
     for (int i = 0; i < SIZE; ++i) {
         for (int j = 0; j < SIZE; ++j) {
@@ -227,14 +228,14 @@ std::vector<Move> Board::generateLegalMoves(bool includeForbidden, bool onlyNear
             for (int dx = -radius; dx <= radius; ++dx) {
                 for (int dy = -radius; dy <= radius; ++dy) {
                     int nx = i + dx, ny = j + dy;
-                    if (inBoard(nx, ny) && board[nx][ny] == EMPTY) {
+                    if (inBoard(nx, ny) && board[nx][ny] == EMPTY)
                         candidates.insert(Move(nx, ny));
-                    }
                 }
             }
         }
     }
 
+    // 若棋盘为空，生成中心附近
     if (candidates.empty()) {
         int center = SIZE / 2;
         for (int dx = -1; dx <= 1; ++dx)
@@ -244,10 +245,17 @@ std::vector<Move> Board::generateLegalMoves(bool includeForbidden, bool onlyNear
             }
     }
 
+    std::vector<Move> moves;
     for (const Move& m : candidates) {
         if (!includeForbidden && isForbidden(m.x, m.y)) continue;
         moves.push_back(m);
     }
+
+    // 回退：邻近生成为空且未要求禁手时，用全盘生成
+    if (moves.empty() && !includeForbidden && onlyNearby) {
+        return generateLegalMoves(false, false);
+    }
+
     return moves;
 }
 
@@ -318,4 +326,8 @@ int Board::evaluateColor(int stone) const {
         }
     }
     return totalScore;
+}
+
+bool Board::hasLegalMoves() const {
+    return !generateLegalMoves(false, false).empty(); // 全盘生成，不包含禁手
 }
