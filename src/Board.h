@@ -24,6 +24,7 @@ struct Move {
     Move(int _x, int _y) : x(_x), y(_y) {}
     bool valid() const { return x >= 0 && x < 15 && y >= 0 && y < 15; }
     bool operator==(const Move& other) const { return x == other.x && y == other.y; }
+    bool operator!=(const Move& other) const { return !(*this == other); }
 };
 
 /**
@@ -105,6 +106,13 @@ public:
      * @return 该方的局面评分
      */
     int evaluateColor(int stone) const;
+
+    /**
+     * @brief 一次遍历同时评估双方局面得分
+     * @param blackScore [out] 黑方评分
+     * @param whiteScore [out] 白方评分
+     */
+    void evaluateBoth(int& blackScore, int& whiteScore) const;
 
     /** @brief 检查当前走棋方是否存在合法着法（不含禁手） */
     bool hasLegalMoves() const;

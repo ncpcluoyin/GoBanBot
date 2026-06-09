@@ -11,7 +11,7 @@
 
 #include <cstdint>
 #include <unordered_map>
-#include <mutex>
+#include <shared_mutex>
 #include "Board.h"
 
 /** @brief 置换表条目标记，区分 Alpha-Beta 搜索中的节点类型 */
@@ -48,7 +48,7 @@ public:
 
 private:
     std::unordered_map<uint64_t, TTEntry> table;  /**< 哈希表存储 */
-    mutable std::mutex mtx;  /**< 互斥锁，保证多线程安全读写 */
+    mutable std::shared_mutex mtx;  /**< 读写锁，允许多读单写 */
 };
 
 #endif

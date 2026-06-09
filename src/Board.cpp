@@ -76,6 +76,7 @@ void Board::undoMove(int x, int y) {
     if (stone == EMPTY) return;
     board[x][y] = EMPTY;
     side = stone;                           // 恢复走棋方
+    lastMove = Move(-1, -1);                // 撤销后上次着法失效
     int idx = (stone == BLACK) ? 0 : 1;
     hash ^= zobristTable[x][y][idx];        // 再次异或即撤销
 }
@@ -85,12 +86,10 @@ void Board::undoMove(int x, int y) {
 // =========================================================================
 
 int Board::checkWinner() const {
-    for (int i = 0; i < SIZE; ++i)
-        for (int j = 0; j < SIZE; ++j) {
-            int stone = board[i][j];
-            if (stone != EMPTY && isFive(i, j, stone))
-                return stone;               // 找到五连即返回
-        }
+    if (!lastMove.valid()) return EMPTY;
+    int stone = board[lastMove.x][lastMove.y];
+    if (stone != EMPTY && isFive(lastMove.x, lastMove.y, stone))
+        return stone;
     return EMPTY;
 }
 
@@ -435,6 +434,70 @@ int Board::evaluateColor(int stone) const {
         }
     }
     return totalScore;
+}
+
+void Board::evaluateBoth(int& blackScore, int& whiteScore) const {
+    blackScore = 0;
+    whiteScore = 0;
+    const int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
+
+    // 栈上分配的 visited 数组避免堆分配开销
+    bool visited[SIZE][SIZE][4] = {false};
+
+    for (int x = 0; x < SIZE; ++x) {
+        for (int y = 0; y < SIZE; ++y) {
+            int stone = board[x][y];
+            if (stone == EMPTY) continue;
+            for (int d = 0; d < 4; ++d) {
+                if (visited[x][y][d]) continue;
+                int dx = dirs[d][0], dy = dirs[d][1];
+
+                int count = 1;
+                int nx = x + dx, ny = y + dy;
+                while (inBoard(nx, ny) && board[nx][ny] == stone) {
+                    ++count;
+                    nx += dx; ny += dy;
+                }
+                bool openEnd1 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
+
+                nx = x - dx; ny = y - dy;
+                while (inBoard(nx, ny) && board[nx][ny] == stone) {
+                    ++count;
+                    nx -= dx; ny -= dy;
+                }
+                bool openEnd2 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
+
+                int tx = x, ty = y;
+                while (inBoard(tx, ty) && board[tx][ty] == stone) {
+                    visited[tx][ty][d] = true;
+                    tx += dx; ty += dy;
+                }
+                tx = x - dx; ty = y - dy;
+                while (inBoard(tx, ty) && board[tx][ty] == stone) {
+                    visited[tx][ty][d] = true;
+                    tx -= dx; ty -= dy;
+                }
+
+                if (count >= 5) continue;
+
+                int openCount = (openEnd1 ? 1 : 0) + (openEnd2 ? 1 : 0);
+                int score = 0;
+                if (count == 4) {
+                    if (openCount == 2) score = SCORE_OPEN_FOUR;
+                    else if (openCount >= 1) score = SCORE_FOUR;
+                } else if (count == 3) {
+                    if (openCount == 2) score = SCORE_OPEN_THREE;
+                    else if (openCount == 1) score = SCORE_THREE;
+                } else if (count == 2) {
+                    if (openCount == 2) score = SCORE_OPEN_TWO;
+                    else if (openCount == 1) score = SCORE_TWO;
+                }
+
+                if (stone == BLACK) blackScore += score;
+                else whiteScore += score;
+            }
+        }
+    }
 }
 
 bool Board::hasLegalMoves() const {

@@ -11,6 +11,7 @@
 
 #include "Board.h"
 #include "Search.h"
+#include "Config.h"
 #include <atomic>
 #include <memory>
 

@@ -2,28 +2,30 @@
  * @file TransTable.cpp
  * @brief 置换表实现
  *
- * 所有公开接口均使用 lock_guard 加锁，保证在多线程搜索环境下
- * store / probe / clear 操作的原子性和数据一致性。
+ * 使用 shared_mutex 实现读写锁：
+ * - probe() 使用 shared_lock，允许多线程并发读取
+ * - store() / clear() 使用 unique_lock，独占写入
  */
 
 #include "TransTable.h"
+#include <mutex>
 
 void TranspositionTable::store(uint64_t key, const TTEntry& entry) {
-    std::lock_guard<std::mutex> lock(mtx);  // 加锁保护写入
-    table[key] = entry;                      // 直接覆盖可能存在的旧条目
+    std::unique_lock<std::shared_mutex> lock(mtx);
+    table[key] = entry;
 }
 
 bool TranspositionTable::probe(uint64_t key, TTEntry& entry) const {
-    std::lock_guard<std::mutex> lock(mtx);  // 加锁保护读取
+    std::shared_lock<std::shared_mutex> lock(mtx);
     auto it = table.find(key);
     if (it != table.end()) {
-        entry = it->second;                  // 命中：拷贝条目
+        entry = it->second;
         return true;
     }
-    return false;                            // 未命中
+    return false;
 }
 
 void TranspositionTable::clear() {
-    std::lock_guard<std::mutex> lock(mtx);  // 加锁保护清空操作
+    std::unique_lock<std::shared_mutex> lock(mtx);
     table.clear();
 }

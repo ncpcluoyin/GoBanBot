@@ -35,15 +35,21 @@ Game::Game() : mode(HUMAN_VS_AI), highlight(false), humanSide(Board::BLACK) {
  * @brief 游戏初始化设置
  *
  * 设置流程：
- * 1. 选择游戏模式（人机 / AI对弈）
- * 2. 是否开启最后落子高亮
+ * 1. 从 GoBanBot.cfg 读取配置（深度、线程、限时、高亮）
+ * 2. 选择游戏模式（人机 / AI对弈）
  * 3. 选择人类颜色（人机模式）
- * 4. 设置 AI 搜索深度（人机统一深度，AI对弈可分别设置）
- * 5. 设置搜索线程数
+ * 4. 应用配置文件中的参数到 AI 引擎
  */
 void Game::setup() {
     clearScreen();
     std::cout << "=== Welcome to GoBanBot ===\n\n";
+
+    // 从配置文件加载参数
+    Config config = loadConfig();
+    std::cout << "Loaded config: depth=" << config.depth
+              << " threads=" << config.threads
+              << " max_time_ms=" << config.maxTimeMs
+              << " highlight=" << (config.highlight ? "on" : "off") << "\n\n";
 
     // 选择游戏模式
     std::cout << "Select mode:\n";
@@ -52,8 +58,8 @@ void Game::setup() {
     int choice = intPrompt("Enter choice", 1, 2);
     mode = (choice == 1) ? HUMAN_VS_AI : AI_VS_AI;
 
-    // 是否高亮最后落子
-    highlight = yesNoPrompt("Enable last move highlight?");
+    // 高亮从配置文件读取
+    highlight = config.highlight;
 
     if (mode == HUMAN_VS_AI) {
         // 人类选择执黑或执白
@@ -77,22 +83,17 @@ void Game::setup() {
         std::cout << "You play as " << (humanSide == Board::BLACK ? "Black (X)" : "White (O)") << ".\n";
         std::cout << "AI plays as " << (humanSide == Board::BLACK ? "White (O)" : "Black (X)") << ".\n";
 
-        // 人机模式：统一 AI 深度
-        int aiDepth = intPrompt("Enter AI search depth", 2, 12);
-        aiBlack.setDepth(aiDepth);
-        aiWhite.setDepth(aiDepth);
+        aiBlack.setDepth(config.depth);
+        aiWhite.setDepth(config.depth);
     } else {
-        // AI vs AI 模式：黑白双方可分别设置深度
-        int depthBlack = intPrompt("Enter search depth for Black (AI)", 2, 12);
-        aiBlack.setDepth(depthBlack);
-        int depthWhite = intPrompt("Enter search depth for White (AI)", 2, 12);
-        aiWhite.setDepth(depthWhite);
+        aiBlack.setDepth(config.depth);
+        aiWhite.setDepth(config.depth);
     }
 
-    // 设置搜索线程数（无上限，传入 -1 表示不检查上限）
-    int threads = intPrompt("Enter number of search threads", 1, -1);
-    aiBlack.setThreads(threads);
-    aiWhite.setThreads(threads);
+    aiBlack.setThreads(config.threads);
+    aiWhite.setThreads(config.threads);
+    aiBlack.setMaxTime(config.maxTimeMs);
+    aiWhite.setMaxTime(config.maxTimeMs);
 
     std::cout << "\nPress Enter to start game...";
     std::cin.ignore();
