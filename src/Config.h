@@ -16,10 +16,11 @@
 #include <cstdlib>
 
 struct Config {
-    int depth = 6;
-    int threads = 1;
+    int depth = 5;
+    int threads = 8;
     int maxTimeMs = 0;
-    bool highlight = false;
+    int nullMoveR = 2;
+    bool highlight = true;
 };
 
 inline std::string cfgTrim(const std::string& s) {
@@ -35,10 +36,11 @@ inline void saveDefaultConfig(const std::string& path) {
     if (!f) return;
     f << "# GoBanBot Configuration File\n";
     f << "# Modify values below and restart the program.\n\n";
-    f << "depth = 6\n";
-    f << "threads = 1\n";
+    f << "depth = 5\n";
+    f << "threads = 8\n";
     f << "max_time_ms = 0\n";
-    f << "highlight = false\n";
+    f << "null_move_r = 2\n";
+    f << "highlight = true\n";
 }
 
 inline Config loadConfig(const std::string& path = "GoBanBot.cfg") {
@@ -70,6 +72,9 @@ inline Config loadConfig(const std::string& path = "GoBanBot.cfg") {
         } else if (key == "max_time_ms") {
             int v = std::stoi(value);
             if (v >= 0) config.maxTimeMs = v;
+        } else if (key == "null_move_r") {
+            int v = std::stoi(value);
+            if (v >= 0 && v <= 10) config.nullMoveR = v;
         } else if (key == "highlight") {
             config.highlight = (lv == "true" || lv == "yes" || lv == "1");
         }

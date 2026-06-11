@@ -36,6 +36,9 @@ public:
     /** @brief 设置单步最大限时（毫秒），0 表示不限时 */
     void setMaxTime(int ms) { maxTimeMs = ms; }
 
+    /** @brief 设置空着剪枝缩减量，0 表示禁用 */
+    void setNullMoveReduction(int r) { nullMoveR = r; }
+
     /** @brief 设置外部停止标志（用于超时/用户中断） */
     void setStopFlag(std::shared_ptr<std::atomic<bool>> flag) { stopFlag = flag; }
 
@@ -50,6 +53,7 @@ private:
     int maxDepth;                                   /**< 最大搜索深度 */
     int numThreads;                                 /**< 搜索线程数 */
     int maxTimeMs;                                  /**< 单步最大限时（毫秒） */
+    int nullMoveR;                                  /**< 空着剪枝缩减量（0=禁用） */
     TranspositionTable tt;                          /**< 置换表 */
     std::shared_ptr<std::atomic<bool>> stopFlag;    /**< 外部停止标志 */
     std::atomic<bool> internalStop;                 /**< 内部停止标志 */
@@ -58,6 +62,7 @@ private:
     static const int WIN_SCORE = 100000;            /**< 胜利分值基准 */
     static const int ASP_WINDOW = 300;              /**< Aspiration 窗口半宽 */
     static const int MAX_DEPTH = 64;                /**< 最大搜索层数（用于 killer 数组） */
+    static const int NULL_MOVE_R = 3;               /**< 空着剪枝的深度缩减量 */
 
     /** @brief Killer move 表：killerMoves[slot][depth]，slot 0 为最新 */
     Move killerMoves[2][MAX_DEPTH];
@@ -78,7 +83,8 @@ private:
      * @param nodeCount 已访问节点计数器（引用，用于定期时间检查）
      * @return 当前局面的评分（从 color 视角）
      */
-    int negamax(int alpha, int beta, int depth, Board& board, int color, uint64_t& nodeCount);
+    int negamax(int alpha, int beta, int depth, Board& board, int color, uint64_t& nodeCount,
+                bool allowNull = true);
 
     /**
      * @brief 静态局面评估

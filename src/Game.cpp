@@ -49,6 +49,7 @@ void Game::setup() {
     std::cout << "Loaded config: depth=" << config.depth
               << " threads=" << config.threads
               << " max_time_ms=" << config.maxTimeMs
+              << " null_move_r=" << config.nullMoveR
               << " highlight=" << (config.highlight ? "on" : "off") << "\n\n";
 
     // 选择游戏模式
@@ -94,6 +95,8 @@ void Game::setup() {
     aiWhite.setThreads(config.threads);
     aiBlack.setMaxTime(config.maxTimeMs);
     aiWhite.setMaxTime(config.maxTimeMs);
+    aiBlack.setNullMoveReduction(config.nullMoveR);
+    aiWhite.setNullMoveReduction(config.nullMoveR);
 
     std::cout << "\nPress Enter to start game...";
     std::cin.ignore();

@@ -13,7 +13,7 @@
 #include <iostream>
 
 Search::Search() : maxDepth(6), numThreads(1), maxTimeMs(0),
-                   stopFlag(nullptr), internalStop(false) {
+                   nullMoveR(NULL_MOVE_R), stopFlag(nullptr), internalStop(false) {
     std::memset(killerMoves, 0, sizeof(killerMoves));
 }
 
@@ -110,7 +110,7 @@ void Search::orderMoves(std::vector<Move>& moves, const Board& board, int color,
 // =========================================================================
 
 int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
-                     uint64_t& nodeCount) {
+                     uint64_t& nodeCount, bool allowNull) {
     // 定期检查时限（每 1023 个节点检查一次，减少开销）
     if (maxTimeMs > 0 && (++nodeCount & 1023) == 0) {
         if (isTimeUp()) return 0;
@@ -140,6 +140,28 @@ int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
     if (board.isFull()) return 0;
     // 终止条件：达到搜索深度，返回静态评估
     if (depth <= 0) return evaluate(board, color);
+
+    // ── 空着剪枝 (Null Move Pruning) ──
+    // 条件：启用 (nullMoveR > 0)、允许空着、剩余深度足够、且非临近终局
+    if (nullMoveR > 0 && allowNull && depth >= nullMoveR + 1 && beta < WIN_SCORE - depth) {
+        // 动态缩减量：深层搜索使用更激进的缩减
+        int R = nullMoveR + (depth >= 7 ? 1 : 0);
+
+        // 模拟空着：不落子，仅切换走棋方
+        int origSide = board.getSide();
+        board.setSide(-origSide);
+
+        // 以零窗口搜索对手走棋后的局面（缩减深度）
+        int nullScore = -negamax(-beta, -beta + 1, depth - 1 - R, board, -color,
+                                 nodeCount, false);
+
+        board.setSide(origSide);  // 恢复走棋方
+
+        // 即使让对手多走一步，我方仍 >= beta → 剪枝
+        if (nullScore >= beta) {
+            return beta;
+        }
+    }
 
     // 生成合法着法（不含禁手，邻近模式）
     auto moves = board.generateLegalMoves(false, true, 2);
