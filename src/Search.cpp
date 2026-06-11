@@ -173,10 +173,23 @@ int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
 
     int best = -INF;
     Move bestMove;
+    bool firstMove = true;
 
     for (const Move& m : moves) {
         board.makeMove(m.x, m.y, color);
-        int val = -negamax(-beta, -alpha, depth - 1, board, -color, nodeCount);
+        int val;
+        if (firstMove) {
+            // 第一个着法：全窗口搜索
+            val = -negamax(-beta, -alpha, depth - 1, board, -color, nodeCount);
+            firstMove = false;
+        } else {
+            // PVS: 零窗口侦察搜索
+            val = -negamax(-alpha - 1, -alpha, depth - 1, board, -color, nodeCount);
+            if (val > alpha && val < beta) {
+                // 侦察搜索触发 fail-high，用全窗口重搜
+                val = -negamax(-beta, -alpha, depth - 1, board, -color, nodeCount);
+            }
+        }
         board.undoMove(m.x, m.y);
 
         if (val > best) {
@@ -185,10 +198,13 @@ int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
         }
         alpha = std::max(alpha, val);
         if (alpha >= beta) {
-            // Beta 剪枝：记录 killer move
-            if (bestMove.valid() && killerMoves[0][depth] != bestMove) {
-                killerMoves[1][depth] = killerMoves[0][depth];
-                killerMoves[0][depth] = bestMove;
+            // Beta 剪枝：更新 killer move 与历史启发
+            if (bestMove.valid()) {
+                if (killerMoves[0][depth] != bestMove) {
+                    killerMoves[1][depth] = killerMoves[0][depth];
+                    killerMoves[0][depth] = bestMove;
+                }
+                history[bestMove.x][bestMove.y] += depth * depth;
             }
             break;
         }
@@ -388,6 +404,7 @@ Move Search::parallelRootSearch(const Board& rootBoard) {
 Move Search::getBestMove(const Board& board) {
     tt.clear();
     std::memset(killerMoves, 0, sizeof(killerMoves));
+    std::memset(history, 0, sizeof(history));
     if (numThreads > 1) {
         return parallelRootSearch(board);
     } else {

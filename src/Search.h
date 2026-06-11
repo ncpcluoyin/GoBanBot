@@ -67,6 +67,9 @@ private:
     /** @brief Killer move 表：killerMoves[slot][depth]，slot 0 为最新 */
     Move killerMoves[2][MAX_DEPTH];
 
+    /** @brief 历史启发表：history[x][y] 记录着法引发剪枝的累积分数 */
+    int history[Board::SIZE][Board::SIZE];
+
     /** @brief 搜索开始时间点 */
     std::chrono::steady_clock::time_point startTime;
 
@@ -98,7 +101,7 @@ private:
      * 排序优先级：
      * 1. 置换表记录的最佳着法（hashMove）置于首位
      * 2. Killer move（兄弟节点产生剪枝的着法）
-     * 3. 其余着法按靠近中心和邻近已有棋子数排序
+     * 3. 其余着法按历史启发 + 位置评分排序
      */
     void orderMoves(std::vector<Move>& moves, const Board& board, int color,
                     const Move& hashMove, int depth);
