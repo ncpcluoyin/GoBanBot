@@ -50,7 +50,9 @@ void Game::setup() {
               << " threads=" << config.threads
               << " max_time_ms=" << config.maxTimeMs
               << " null_move_r=" << config.nullMoveR
-              << " highlight=" << (config.highlight ? "on" : "off") << "\n\n";
+              << " highlight=" << (config.highlight ? "on" : "off")
+              << " swap=" << (config.swapRule ? "on" : "off")
+              << " twoMove=" << (config.twoMoveRule ? "on" : "off") << "\n\n";
 
     // 选择游戏模式
     std::cout << "Select mode:\n";
@@ -59,8 +61,10 @@ void Game::setup() {
     int choice = intPrompt("Enter choice", 1, 2);
     mode = (choice == 1) ? HUMAN_VS_AI : AI_VS_AI;
 
-    // 高亮从配置文件读取
+    // 从配置文件读取规则参数
     highlight = config.highlight;
+    swapRule = config.swapRule;
+    twoMoveRule = config.twoMoveRule;
 
     if (mode == HUMAN_VS_AI) {
         // 人类选择执黑或执白
@@ -155,10 +159,66 @@ void Game::printBoard() const {
 // =========================================================================
 
 /**
+ * @brief 检查着法是否在开局允许范围内
+ *
+ * 开局限制：
+ * - 第 1 手（moveCount==0）：必须落在中心 H8
+ * - 第 2 手（moveCount==1）：天元周围 3×3 区域 (G7-I9)
+ * - 第 3 手（moveCount==2）：天元周围 5×5 区域 (F6-J10)
+ */
+bool Game::isValidOpening(int x, int y) const {
+    if (moveCount >= 3) return true;
+    int c = Board::SIZE / 2;
+    if (moveCount == 0) return x == c && y == c;
+    if (moveCount == 1) return std::abs(x - c) <= 1 && std::abs(y - c) <= 1;
+    return std::abs(x - c) <= 2 && std::abs(y - c) <= 2;  // moveCount == 2
+}
+
+/**
+ * @brief 三手交换下 AI 均衡着法选择
+ *
+ * 在 swapRule 开启且 AI 执黑走第 3 手时使用：
+ * 1. 全深度搜索获取 Top-7 候选及其搜索评分
+ * 2. 按评分升序排列（低分 = 黑方优势小）
+ * 3. 选取评分 >= 0 且最低的着法（刚好不劣，但优势最小）
+ *
+ * 原理：黑方优势过大会触发白方交换，黑方反而变成劣势方。
+ * 黑方最优策略是制造尽可能均衡的局面（评分 ≈ 0）。
+ */
+void Game::aiTurnBalanced(Search& ai, const std::string& name) {
+    std::cout << name << " is thinking (balanced)...\n";
+    *stopFlag = false;
+    ai.setStopFlag(stopFlag);
+
+    // 全深度搜索 Top-7，返回 (着法, 评分)
+    auto scored = ai.getTopMovesScored(board, 7);
+    if (scored.size() <= 1) {
+        aiTurn(ai, name);
+        return;
+    }
+
+    // 按评分升序（黑方优势最小的在前）
+    std::sort(scored.begin(), scored.end(),
+        [](const auto& a, const auto& b) { return a.second < b.second; });
+
+    // 选择评分 >= 0 且最低的着法（刚好不劣，优势最小）
+    Move bestMove = scored[0].first;
+    for (const auto& [m, s] : scored) {
+        if (s >= 0) {
+            bestMove = m;
+            break;
+        }
+    }
+
+    board.makeMove(bestMove.x, bestMove.y, board.getSide());
+    std::cout << name << " plays " << char('A'+bestMove.x) << bestMove.y+1 << "\n";
+}
+
+/**
  * @brief 处理人类玩家输入
  *
  * 输入格式：字母+数字，如 "H8" 表示第 H 列第 8 行。
- * 对非法输入（格式错误、越界、禁手）会提示并重新要求输入。
+ * 对非法输入（格式错误、越界、禁手、开局限制）会提示并重新要求输入。
  */
 void Game::humanTurn() {
     while (true) {
@@ -184,6 +244,15 @@ void Game::humanTurn() {
         }
         if (board.isForbidden(x, y)) {
             std::cout << "That move is forbidden for Black.\n";
+            continue;
+        }
+        if (!isValidOpening(x, y)) {
+            if (moveCount == 0)
+                std::cout << "First move must be at H8 (center).\n";
+            else if (moveCount == 1)
+                std::cout << "Move must be within 3x3 around center (G7-I9).\n";
+            else
+                std::cout << "Move must be within 5x5 central area (F6-J10).\n";
             continue;
         }
         board.makeMove(x, y, humanSide);
@@ -249,6 +318,190 @@ void Game::checkGameOver(bool& over) {
     }
 }
 
+// =========================================================================
+//  三手交换
+// =========================================================================
+
+/**
+ * @brief 三手交换规则处理
+ *
+ * 第 3 手结束后，白方（第二玩家）可选择是否交换颜色。
+ * 交换后 humanSide 翻转，走棋方不变（仍为白方走第 4 手）。
+ */
+void Game::handleSwap() {
+    // 确定白方是人类还是 AI
+    // 注意：走棋方轮替为 side = -stone，所以 3 手后 getSide() 是 WHITE
+    bool whiteIsHuman = (humanSide == Board::WHITE);
+
+    bool doSwap = false;
+    if (whiteIsHuman) {
+        std::cout << "\n--- Swap Rule ---\n";
+        std::cout << "You are White. You may swap colors with Black.\n";
+        std::cout << "If you swap, you will play as Black from now on.\n";
+        doSwap = yesNoPrompt("Do you want to swap?");
+    } else {
+        // AI 作为白方，基于局面评估决定是否交换
+        int blackScore, whiteScore;
+        board.evaluateBoth(blackScore, whiteScore);
+        int adv = blackScore - whiteScore;       // 正值 = 黑方优势
+
+        // 交换阈值：若黑方优势明显（先行利），AI 交换拿黑
+        // 3 手时棋盘仅有 3 子，通常差值较小；阈值不宜过大
+        doSwap = (adv > 800);
+        std::cout << "\n--- Swap Rule ---\n";
+        std::cout << "AI (White) evaluates: Black+=" << adv
+                  << " | " << (doSwap ? "swaps!" : "does not swap.") << "\n";
+        std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    }
+
+    if (doSwap) {
+        humanSide = -humanSide;              // 翻转人类执棋颜色
+        std::cout << "Colors swapped! You now play as "
+                  << (humanSide == Board::BLACK ? "Black (X)" : "White (O)") << ".\n";
+        std::cout << "Press Enter to continue...";
+        std::cin.ignore();
+        std::cin.get();
+    }
+}
+
+// =========================================================================
+//  五手两打
+// =========================================================================
+
+/**
+ * @brief 五手两打规则处理
+ *
+ * 第 5 手时，黑方必须提出两个不同着法，白方选择其中一个实际落子。
+ */
+void Game::handleTwoMoves() {
+    int blackSide = board.getSide();         // 此时应为 BLACK
+    bool blackIsHuman = (humanSide == Board::BLACK);
+
+    std::vector<Move> candidates;
+
+    if (blackIsHuman) {
+        // ── 人类是黑方：输入两个候选着法 ──
+        std::cout << "\n--- Two-Move Rule (5th move) ---\n";
+        std::cout << "As Black, you must propose TWO different moves.\n";
+        std::cout << "White (AI) will choose one of them.\n\n";
+
+        for (int i = 0; i < 2; ++i) {
+            while (true) {
+                std::cout << "Proposal " << (i+1) << " (e.g., H8): ";
+                std::string input;
+                std::cin >> input;
+                if (input.length() < 2) {
+                    std::cout << "Invalid format. Use letter+number (A-O, 1-15).\n";
+                    continue;
+                }
+                char colChar = std::toupper(input[0]);
+                int x = colChar - 'A';
+                std::string rowStr = input.substr(1);
+                int y;
+                try { y = std::stoi(rowStr) - 1; }
+                catch (...) { std::cout << "Invalid number.\n"; continue; }
+
+                if (!board.inBoard(x, y) || !board.isEmpty(x, y)) {
+                    std::cout << "Illegal move.\n";
+                    continue;
+                }
+                if (board.isForbidden(x, y)) {
+                    std::cout << "That move is forbidden for Black.\n";
+                    continue;
+                }
+                // 确保不与已提交的候选重复
+                bool dup = false;
+                for (const Move& c : candidates) {
+                    if (c.x == x && c.y == y) { dup = true; break; }
+                }
+                if (dup) {
+                    std::cout << "Move already proposed. Choose a different one.\n";
+                    continue;
+                }
+                candidates.emplace_back(x, y);
+                break;
+            }
+        }
+
+        // AI（白方）从两个候选中选择一个
+        // 选择对白方最有利的着法（即黑方得分最低的）
+        int bestForWhite = 1000000;          // 极大值
+        Move chosen = candidates[0];
+        for (const Move& m : candidates) {
+            Board temp = board;
+            temp.makeMove(m.x, m.y, Board::BLACK);
+            int blackScore, whiteScore;
+            temp.evaluateBoth(blackScore, whiteScore);
+            int score = blackScore - whiteScore;   // 正值利于黑方，负值利于白方
+            if (score < bestForWhite) {
+                bestForWhite = score;
+                chosen = m;
+            }
+        }
+        std::cout << "AI (White) chooses: " << char('A'+chosen.x) << chosen.y+1 << "\n";
+        board.makeMove(chosen.x, chosen.y, blackSide);
+
+    } else {
+        // ── AI 是黑方：AI 提出两个候选，人类选择 ──
+        std::cout << "\n--- Two-Move Rule (5th move) ---\n";
+        std::cout << "AI (Black) is thinking...\n";
+
+        *stopFlag = false;
+        aiBlack.setStopFlag(stopFlag);
+        // 获取 Top-5 候选，用于对抗性配对
+        std::vector<Move> topCandidates = aiBlack.getTopMoves(board, 5);
+
+        if (topCandidates.size() < 2) {
+            if (!topCandidates.empty()) {
+                board.makeMove(topCandidates[0].x, topCandidates[0].y, blackSide);
+                std::cout << "AI (Black) plays " << char('A'+topCandidates[0].x)
+                          << topCandidates[0].y+1 << "\n";
+            }
+            return;
+        }
+
+        // 对抗性配对：人类（白方）会选择对黑方最不利的着法
+        // AI 的目标：最大化 min(score1, score2)，即两个候选中最差的那个也要尽量好
+        // 对每个候选，用迷你搜索评估 blackScore - whiteScore
+        std::vector<std::pair<int, Move>> evaluated;
+        for (const Move& m : topCandidates) {
+            Board temp = board;
+            temp.makeMove(m.x, m.y, Board::BLACK);
+            int bs, ws;
+            temp.evaluateBoth(bs, ws);
+            int adv = bs - ws;             // 黑方优势值（越大黑方越有利）
+            evaluated.emplace_back(adv, m);
+        }
+
+        // 遍历所有配对，选择 max-min 最优
+        int bestPairMin = -1000000;
+        int bestI = 0, bestJ = 1;
+        for (size_t i = 0; i < evaluated.size(); ++i) {
+            for (size_t j = i + 1; j < evaluated.size(); ++j) {
+                int pairMin = std::min(evaluated[i].first, evaluated[j].first);
+                if (pairMin > bestPairMin) {
+                    bestPairMin = pairMin;
+                    bestI = (int)i; bestJ = (int)j;
+                }
+            }
+        }
+
+        candidates = {evaluated[bestI].second, evaluated[bestJ].second};
+
+        std::cout << "AI (Black) proposes two moves:\n";
+        std::cout << "  1. " << char('A'+candidates[0].x) << candidates[0].y+1 << "\n";
+        std::cout << "  2. " << char('A'+candidates[1].x) << candidates[1].y+1 << "\n";
+
+        int choice = intPrompt("As White, choose one", 1, 2);
+        Move chosen = candidates[choice - 1];
+        board.makeMove(chosen.x, chosen.y, blackSide);
+    }
+
+    std::cout << "Press Enter to continue...";
+    std::cin.ignore();
+    std::cin.get();
+}
+
 /**
  * @brief 清屏并宣布游戏结果
  */
@@ -279,18 +532,55 @@ void Game::announceResult(int winner) const {
  */
 void Game::run() {
     bool gameOver = false;
-    board.reset();                                      // 重置棋盘到初始状态
+    board.reset();
+    moveCount = 0;
+    swapDone = false;
 
     while (!gameOver) {
         clearScreen();
         printBoard();
 
+        // ── 三手交换（人机模式，第 3 手后） ──
+        if (mode == HUMAN_VS_AI && swapRule && moveCount == 3 && !swapDone) {
+            handleSwap();
+            swapDone = true;
+        }
+
+        // ── 五手两打（人机模式，第 5 手） ──
+        if (mode == HUMAN_VS_AI && twoMoveRule && moveCount == 4) {
+            handleTwoMoves();
+            moveCount++;
+            checkGameOver(gameOver);
+            continue;
+        }
+
+        // ── 正常着法 ──
+        // 开局前 3 手：仅人机模式下设置根着法边界（AI vs AI 不受限）
+        if (moveCount < 3 && mode == HUMAN_VS_AI) {
+            int c = Board::SIZE / 2;
+            if (moveCount == 0) {
+                aiBlack.setRootBounds(c, c, c, c);
+                aiWhite.setRootBounds(c, c, c, c);
+            } else if (moveCount == 1) {
+                aiBlack.setRootBounds(c-1, c-1, c+1, c+1);
+                aiWhite.setRootBounds(c-1, c-1, c+1, c+1);
+            } else {
+                aiBlack.setRootBounds(c-2, c-2, c+2, c+2);
+                aiWhite.setRootBounds(c-2, c-2, c+2, c+2);
+            }
+        } else {
+            aiBlack.clearRootBounds();
+            aiWhite.clearRootBounds();
+        }
+
         if (mode == HUMAN_VS_AI) {
             if (board.getSide() == humanSide) {
-                humanTurn();                            // 人类回合
+                humanTurn();
             } else {
-                // AI 回合：根据当前颜色使用对应的 AI 引擎
-                if (board.getSide() == Board::BLACK)
+                // 三手交换下 AI 执黑第 3 手：选均衡着法防止被交换
+                if (swapRule && moveCount == 2 && board.getSide() == Board::BLACK)
+                    aiTurnBalanced(aiBlack, "AI (Black)");
+                else if (board.getSide() == Board::BLACK)
                     aiTurn(aiBlack, "AI (Black)");
                 else
                     aiTurn(aiWhite, "AI (White)");
@@ -302,13 +592,13 @@ void Game::run() {
             } else {
                 aiTurn(aiWhite, "AI White");
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));  // 观察延迟
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
 
+        moveCount++;
         checkGameOver(gameOver);
     }
 
-    // 游戏结束：最终清屏并打印结果
     clearScreen();
     printBoard();
     announceResult(board.checkWinner());

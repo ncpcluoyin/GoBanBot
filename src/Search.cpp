@@ -228,6 +228,20 @@ int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
 }
 
 // =========================================================================
+//  根着法边界过滤
+// =========================================================================
+
+std::vector<Move> Search::filterByBounds(const std::vector<Move>& moves) const {
+    if (!useRootFilter || moves.empty()) return moves;
+    std::vector<Move> filtered;
+    for (const Move& m : moves) {
+        if (m.x >= rootMinX && m.x <= rootMaxX && m.y >= rootMinY && m.y <= rootMaxY)
+            filtered.push_back(m);
+    }
+    return filtered.empty() ? moves : filtered;  // 过滤后为空的回退到全量
+}
+
+// =========================================================================
 //  迭代加深搜索（单线程）
 // =========================================================================
 
@@ -237,7 +251,7 @@ Move Search::iterativeDeepening(const Board& rootBoard) {
     startTime = std::chrono::steady_clock::now();
 
     int color = rootBoard.getSide();
-    auto moves = rootBoard.generateLegalMoves(false, true, 2);
+    auto moves = filterByBounds(rootBoard.generateLegalMoves(false, true, 2));
     if (moves.empty()) return Move(-1, -1);
 
     // ---------- 立即获胜检测（自己） ----------
@@ -322,7 +336,7 @@ Move Search::iterativeDeepening(const Board& rootBoard) {
 // =========================================================================
 
 Move Search::parallelRootSearch(const Board& rootBoard) {
-    auto moves = rootBoard.generateLegalMoves(false, true, 2);
+    auto moves = filterByBounds(rootBoard.generateLegalMoves(false, true, 2));
     if (moves.empty()) return Move(-1, -1);
 
     int color = rootBoard.getSide();
@@ -406,6 +420,123 @@ Move Search::parallelRootSearch(const Board& rootBoard) {
     }
     *localStop = true;
     return globalBestMove;
+}
+
+// =========================================================================
+//  多着法返回（用于五手两打 AI 候选生成）
+// =========================================================================
+
+std::vector<Move> Search::getTopMoves(const Board& board, int n) {
+    tt.clear();
+    std::memset(killerMoves, 0, sizeof(killerMoves));
+    std::memset(history, 0, sizeof(history));
+
+    auto moves = filterByBounds(board.generateLegalMoves(false, true, 2));
+    if (moves.empty()) return {};
+
+    int color = board.getSide();
+
+    // 立即获胜检测
+    for (const Move& m : moves) {
+        Board temp = board;
+        temp.makeMove(m.x, m.y, color);
+        if (temp.checkWinner() == color) {
+            return {m};             // 有必胜着法，直接返回
+        }
+    }
+
+    // 对手必胜威胁检测
+    int oppColor = -color;
+    std::vector<Move> threats;
+    for (const Move& m : moves) {
+        Board temp = board;
+        temp.makeMove(m.x, m.y, oppColor);
+        if (temp.checkWinner() == oppColor) {
+            threats.push_back(m);
+        }
+    }
+    if (!threats.empty()) {
+        return {threats.front()};   // 只能堵威胁
+    }
+
+    // 一次性搜索：对每个根着法执行全深度搜索，收集评分
+    std::vector<std::pair<int, Move>> scored;
+    Board b = board;
+    uint64_t nodeCount = 0;
+    for (const Move& m : moves) {
+        b.makeMove(m.x, m.y, color);
+        int val = -negamax(-INF, INF, maxDepth - 1, b, -color, nodeCount);
+        b.undoMove(m.x, m.y);
+        scored.emplace_back(-val, m);   // 负值使排序从大到小
+    }
+
+    std::sort(scored.begin(), scored.end(),
+        [](const std::pair<int, Move>& a, const std::pair<int, Move>& b) {
+            return a.first < b.first;
+        });
+
+    std::vector<Move> result;
+    for (int i = 0; i < std::min(n, (int)scored.size()); ++i) {
+        result.push_back(scored[i].second);
+    }
+    return result;
+}
+
+std::vector<std::pair<Move, int>> Search::getTopMovesScored(const Board& board, int n) {
+    tt.clear();
+    std::memset(killerMoves, 0, sizeof(killerMoves));
+    std::memset(history, 0, sizeof(history));
+
+    auto moves = filterByBounds(board.generateLegalMoves(false, true, 2));
+    if (moves.empty()) return {};
+
+    int color = board.getSide();
+
+    // 立即获胜检测
+    for (const Move& m : moves) {
+        Board temp = board;
+        temp.makeMove(m.x, m.y, color);
+        if (temp.checkWinner() == color) {
+            return {{m, 100000}};         // WIN_SCORE
+        }
+    }
+
+    // 对手必胜威胁检测
+    int oppColor = -color;
+    std::vector<Move> threats;
+    for (const Move& m : moves) {
+        Board temp = board;
+        temp.makeMove(m.x, m.y, oppColor);
+        if (temp.checkWinner() == oppColor) {
+            threats.push_back(m);
+        }
+    }
+    if (!threats.empty()) {
+        return {{threats.front(), 0}};
+    }
+
+    // 全深度搜索每个根着法
+    std::vector<std::pair<int, Move>> scored;
+    Board b = board;
+    uint64_t nodeCount = 0;
+    for (const Move& m : moves) {
+        b.makeMove(m.x, m.y, color);
+        int val = -negamax(-INF, INF, maxDepth - 1, b, -color, nodeCount);
+        b.undoMove(m.x, m.y);
+        scored.emplace_back(-val, m);       // 负值使降序排列
+    }
+
+    std::sort(scored.begin(), scored.end(),
+        [](const std::pair<int, Move>& a, const std::pair<int, Move>& b) {
+            return a.first < b.first;
+        });
+
+    // 返回 (着法, 评分)，评分从当前走棋方视角（正=有利）
+    std::vector<std::pair<Move, int>> result;
+    for (int i = 0; i < std::min(n, (int)scored.size()); ++i) {
+        result.emplace_back(scored[i].second, -scored[i].first);
+    }
+    return result;
 }
 
 // =========================================================================

@@ -21,6 +21,8 @@ struct Config {
     int maxTimeMs = 0;
     int nullMoveR = 2;
     bool highlight = true;
+    bool swapRule = true;       /**< 三手交换规则（人机模式） */
+    bool twoMoveRule = true;    /**< 五手两打规则（人机模式） */
 };
 
 inline std::string cfgTrim(const std::string& s) {
@@ -41,6 +43,8 @@ inline void saveDefaultConfig(const std::string& path) {
     f << "max_time_ms = 0\n";
     f << "null_move_r = 2\n";
     f << "highlight = true\n";
+    f << "swap_rule = true\n";
+    f << "two_move_rule = true\n";
 }
 
 inline Config loadConfig(const std::string& path = "GoBanBot.cfg") {
@@ -77,6 +81,10 @@ inline Config loadConfig(const std::string& path = "GoBanBot.cfg") {
             if (v >= 0 && v <= 10) config.nullMoveR = v;
         } else if (key == "highlight") {
             config.highlight = (lv == "true" || lv == "yes" || lv == "1");
+        } else if (key == "swap_rule") {
+            config.swapRule = (lv == "true" || lv == "yes" || lv == "1");
+        } else if (key == "two_move_rule") {
+            config.twoMoveRule = (lv == "true" || lv == "yes" || lv == "1");
         }
     }
     return config;

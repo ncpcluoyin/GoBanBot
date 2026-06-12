@@ -36,7 +36,11 @@ private:
     enum Mode { HUMAN_VS_AI, AI_VS_AI };           /**< 游戏模式 */
     Mode mode;                                     /**< 当前游戏模式 */
     bool highlight;                                /**< 是否高亮最后落子 */
+    bool swapRule;                                 /**< 三手交换规则 */
+    bool twoMoveRule;                              /**< 五手两打规则 */
     int humanSide;                                 /**< 人类执棋颜色（人机模式） */
+    int moveCount;                                 /**< 当前已走步数 */
+    bool swapDone;                                 /**< 三手交换是否已完成 */
 
     /** @brief 打印当前棋盘到控制台（含坐标和最后落子高亮） */
     void printBoard() const;
@@ -52,6 +56,18 @@ private:
 
     /** @brief 宣布游戏结果 */
     void announceResult(int winner) const;
+
+    /** @brief 三手交换：白方决定是否交换颜色 */
+    void handleSwap();
+
+    /** @brief 五手两打：黑方提出两个着法，白方选择 */
+    void handleTwoMoves();
+
+    /** @brief 检查着法是否在开局允许范围内 */
+    bool isValidOpening(int x, int y) const;
+
+    /** @brief 三手交换下 AI 均衡着法选择（全深度候选 + 均衡后过滤） */
+    void aiTurnBalanced(Search& ai, const std::string& name);
 };
 
 #endif

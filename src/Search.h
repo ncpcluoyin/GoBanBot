@@ -42,12 +42,37 @@ public:
     /** @brief 设置外部停止标志（用于超时/用户中断） */
     void setStopFlag(std::shared_ptr<std::atomic<bool>> flag) { stopFlag = flag; }
 
+    /** @brief 设置根着法边界过滤（开局限制用），min/max 均为 inclusive */
+    void setRootBounds(int minX, int minY, int maxX, int maxY) {
+        rootMinX = minX; rootMinY = minY;
+        rootMaxX = maxX; rootMaxY = maxY;
+        useRootFilter = true;
+    }
+    /** @brief 清除根着法边界过滤 */
+    void clearRootBounds() { useRootFilter = false; }
+
     /**
      * @brief 获取当前局面的最佳着法
      *
      * 根据线程数自动选择单线程迭代加深或多线程并行根搜索。
      */
     Move getBestMove(const Board& board);
+
+    /**
+     * @brief 获取当前局面评分最高的前 N 个着法
+     *
+     * 对每个根着法执行全深度搜索，按评分降序返回。
+     * 用于五手两打规则中的 AI 候选着法生成。
+     */
+    std::vector<Move> getTopMoves(const Board& board, int n);
+
+    /**
+     * @brief 获取评分最高的前 N 个着法（含评分）
+     *
+     * 返回 (着法, 评分) 对，评分从当前走棋方视角（越高越有利）。
+     * 用于三手交换中的均衡着法选择。
+     */
+    std::vector<std::pair<Move, int>> getTopMovesScored(const Board& board, int n);
 
 private:
     int maxDepth;                                   /**< 最大搜索深度 */
@@ -70,6 +95,13 @@ private:
 
     /** @brief 历史启发表：history[x][y] 记录着法引发剪枝的累积分数 */
     int history[Board::SIZE][Board::SIZE];
+
+    /** 根着法边界过滤 */
+    int rootMinX = 0, rootMinY = 0, rootMaxX = 14, rootMaxY = 14;
+    bool useRootFilter = false;
+
+    /** @brief 按边界过滤着法列表 */
+    std::vector<Move> filterByBounds(const std::vector<Move>& moves) const;
 
     /** @brief 搜索开始时间点 */
     std::chrono::steady_clock::time_point startTime;
