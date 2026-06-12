@@ -63,6 +63,7 @@ private:
     static const int ASP_WINDOW = 300;              /**< Aspiration 窗口半宽 */
     static const int MAX_DEPTH = 64;                /**< 最大搜索层数（用于 killer 数组） */
     static const int NULL_MOVE_R = 3;               /**< 空着剪枝的深度缩减量 */
+    static const int SCORE_OPEN_THREAT = 10000;    /**< 空着剪枝威胁阈值：评估低于此值禁用空着 */
 
     /** @brief Killer move 表：killerMoves[slot][depth]，slot 0 为最新 */
     Move killerMoves[2][MAX_DEPTH];

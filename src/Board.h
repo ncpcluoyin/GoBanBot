@@ -70,7 +70,8 @@ public:
 
     /** @brief 获取当前走棋方 */
     int getSide() const { return side; }
-    void setSide(int s) { side = s; }
+    /** @brief 设置当前走棋方（同步更新 Zobrist 哈希） */
+    void setSide(int s) { if (s != side) { side = s; hash ^= zobristSideKey; } }
 
     /** @brief 检查是否已有胜者，返回获胜方（BLACK/WHITE），无胜者返回 EMPTY */
     int checkWinner() const;
@@ -125,6 +126,7 @@ private:
 
     /** Zobrist 哈希随机数表，全局共享，首次构造时初始化 */
     static uint64_t zobristTable[SIZE][SIZE][2];
+    static uint64_t zobristSideKey;            /**< 走棋方哈希常数 */
     static bool zobristInitialized;
     static void initZobrist();
 

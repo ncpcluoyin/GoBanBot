@@ -142,8 +142,10 @@ int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
     if (depth <= 0) return evaluate(board, color);
 
     // ── 空着剪枝 (Null Move Pruning) ──
-    // 条件：启用 (nullMoveR > 0)、允许空着、剩余深度足够、且非临近终局
-    if (nullMoveR > 0 && allowNull && depth >= nullMoveR + 1 && beta < WIN_SCORE - depth) {
+    // 条件：启用、允许空着、深度足够、非终局、且我方没有被一步杀的危险
+    if (nullMoveR > 0 && allowNull && depth >= nullMoveR + 1
+        && beta < WIN_SCORE - depth
+        && evaluate(board, color) > -SCORE_OPEN_THREAT) {
         // 动态缩减量：深层搜索使用更激进的缩减
         int R = nullMoveR + (depth >= 7 ? 1 : 0);
 
@@ -180,14 +182,23 @@ int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
         int val;
         if (firstMove) {
             // 第一个着法：全窗口搜索
-            val = -negamax(-beta, -alpha, depth - 1, board, -color, nodeCount);
+            int score = -negamax(-beta, -alpha, depth - 1, board, -color, nodeCount);
+            // 首个着法若仍然触发剪枝，说明该着法极强，记录为 killer
+            if (score >= beta) {
+                if (killerMoves[0][depth] != m) {
+                    killerMoves[1][depth] = killerMoves[0][depth];
+                    killerMoves[0][depth] = m;
+                }
+                history[m.x][m.y] += depth * depth;
+            }
+            val = score;
             firstMove = false;
         } else {
             // PVS: 零窗口侦察搜索
             val = -negamax(-alpha - 1, -alpha, depth - 1, board, -color, nodeCount);
             if (val > alpha && val < beta) {
-                // 侦察搜索触发 fail-high，用全窗口重搜
-                val = -negamax(-beta, -alpha, depth - 1, board, -color, nodeCount);
+                // 侦察搜索触发 fail-high，用收紧窗口重搜
+                val = -negamax(-beta, -val, depth - 1, board, -color, nodeCount);
             }
         }
         board.undoMove(m.x, m.y);
@@ -198,13 +209,13 @@ int Search::negamax(int alpha, int beta, int depth, Board& board, int color,
         }
         alpha = std::max(alpha, val);
         if (alpha >= beta) {
-            // Beta 剪枝：更新 killer move 与历史启发
-            if (bestMove.valid()) {
-                if (killerMoves[0][depth] != bestMove) {
+            // Beta 剪枝：记录引起剪枝的着法为 killer move，更新历史启发
+            if (m.valid()) {
+                if (killerMoves[0][depth] != m) {
                     killerMoves[1][depth] = killerMoves[0][depth];
-                    killerMoves[0][depth] = bestMove;
+                    killerMoves[0][depth] = m;
                 }
-                history[bestMove.x][bestMove.y] += depth * depth;
+                history[m.x][m.y] += depth * depth;
             }
             break;
         }

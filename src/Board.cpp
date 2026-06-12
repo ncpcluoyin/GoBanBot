@@ -20,6 +20,7 @@ struct MoveHash {
 
 // 静态成员定义
 uint64_t Board::zobristTable[Board::SIZE][Board::SIZE][2];
+uint64_t Board::zobristSideKey = 0;
 bool Board::zobristInitialized = false;
 
 // =========================================================================
@@ -47,13 +48,14 @@ void Board::initZobrist() {
         for (int j = 0; j < SIZE; ++j)
             for (int k = 0; k < 2; ++k)
                 zobristTable[i][j][k] = rng();
+    zobristSideKey = rng();
 }
 
 void Board::reset() {
     std::memset(board, 0, sizeof(board));
     side = BLACK;
     lastMove = Move(-1, -1);
-    hash = 0;
+    hash = zobristSideKey;          // 初始哈希：空盘 + 黑方先行
 }
 
 // =========================================================================
@@ -66,7 +68,8 @@ bool Board::makeMove(int x, int y, int stone) {
     lastMove = Move(x, y);
     side = -stone;                          // 切换走棋方
     int idx = (stone == BLACK) ? 0 : 1;     // 黑→0，白→1
-    hash ^= zobristTable[x][y][idx];        // 异或更新哈希
+    hash ^= zobristTable[x][y][idx]         // 异或棋子
+         ^ zobristSideKey;                  // 异或走棋方切换
     return true;
 }
 
@@ -78,7 +81,8 @@ void Board::undoMove(int x, int y) {
     side = stone;                           // 恢复走棋方
     lastMove = Move(-1, -1);                // 撤销后上次着法失效
     int idx = (stone == BLACK) ? 0 : 1;
-    hash ^= zobristTable[x][y][idx];        // 再次异或即撤销
+    hash ^= zobristTable[x][y][idx]         // 撤销棋子
+         ^ zobristSideKey;                  // 撤销走棋方切换
 }
 
 // =========================================================================
