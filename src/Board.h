@@ -103,26 +103,46 @@ public:
 
     /**
      * @brief 评估某方在当前局面的得分
+     *
+     * 使用增量维护的缓存评分，O(1) 时间复杂度。
      * @param stone 要评估的棋子颜色 (BLACK / WHITE)
      * @return 该方的局面评分
      */
-    int evaluateColor(int stone) const;
+    int evaluateColor(int stone) const { return stone == BLACK ? cachedBlackScore : cachedWhiteScore; }
 
     /**
      * @brief 一次遍历同时评估双方局面得分
+     *
+     * 使用增量维护的缓存评分，O(1) 时间复杂度。
      * @param blackScore [out] 黑方评分
      * @param whiteScore [out] 白方评分
      */
-    void evaluateBoth(int& blackScore, int& whiteScore) const;
+    void evaluateBoth(int& blackScore, int& whiteScore) const {
+        blackScore = cachedBlackScore;
+        whiteScore = cachedWhiteScore;
+    }
 
     /** @brief 检查当前走棋方是否存在合法着法（不含禁手） */
     bool hasLegalMoves() const;
+
+    /** @brief 全盘重算评分，用于验证增量更新的一致性（调试用） */
+    void fullRecalcScores();
 
 private:
     int board[SIZE][SIZE];      /**< 棋盘数据，board[x][y] */
     Move lastMove;              /**< 最后一步着法记录 */
     int side;                   /**< 当前走棋方 (BLACK / WHITE) */
     uint64_t hash;              /**< Zobrist 哈希值 */
+
+    /** 增量维护的缓存评分，makeMove/undoMove 时自动更新 */
+    int cachedBlackScore;
+    int cachedWhiteScore;
+
+    /** @brief 计算在 (x,y) 落子 stone 对双方评分的增量变化 */
+    void computeDelta(int x, int y, int stone, int& deltaBlack, int& deltaWhite) const;
+
+    /** @brief 根据连子数和开放端计算评分 */
+    static int scoreRun(int len, bool openBefore, bool openAfter);
 
     /** Zobrist 哈希随机数表，全局共享，首次构造时初始化 */
     static uint64_t zobristTable[SIZE][SIZE][2];

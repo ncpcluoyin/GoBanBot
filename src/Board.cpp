@@ -55,7 +55,9 @@ void Board::reset() {
     std::memset(board, 0, sizeof(board));
     side = BLACK;
     lastMove = Move(-1, -1);
-    hash = zobristSideKey;          // 初始哈希：空盘 + 黑方先行
+    hash = zobristSideKey;
+    cachedBlackScore = 0;
+    cachedWhiteScore = 0;
 }
 
 // =========================================================================
@@ -64,12 +66,20 @@ void Board::reset() {
 
 bool Board::makeMove(int x, int y, int stone) {
     if (!inBoard(x, y) || board[x][y] != EMPTY) return false;
+
+    // 增量计算评分变化（落子前，board[x][y] == EMPTY）
+    int deltaBlack, deltaWhite;
+    computeDelta(x, y, stone, deltaBlack, deltaWhite);
+
     board[x][y] = stone;
     lastMove = Move(x, y);
     side = -stone;                          // 切换走棋方
-    int idx = (stone == BLACK) ? 0 : 1;     // 黑→0，白→1
+    int idx = (stone == BLACK) ? 0 : 1;
     hash ^= zobristTable[x][y][idx]         // 异或棋子
          ^ zobristSideKey;                  // 异或走棋方切换
+
+    cachedBlackScore += deltaBlack;
+    cachedWhiteScore += deltaWhite;
     return true;
 }
 
@@ -83,6 +93,12 @@ void Board::undoMove(int x, int y) {
     int idx = (stone == BLACK) ? 0 : 1;
     hash ^= zobristTable[x][y][idx]         // 撤销棋子
          ^ zobristSideKey;                  // 撤销走棋方切换
+
+    // 增量撤销评分变化（撤子后 board[x][y] == EMPTY，与落子前的状态一致）
+    int deltaBlack, deltaWhite;
+    computeDelta(x, y, stone, deltaBlack, deltaWhite);
+    cachedBlackScore -= deltaBlack;
+    cachedWhiteScore -= deltaWhite;
 }
 
 // =========================================================================
@@ -351,101 +367,111 @@ std::vector<Move> Board::generateLegalMoves(bool includeForbidden, bool onlyNear
 }
 
 // =========================================================================
-//  局面评估
+//  局面评估 — 增量维护
 // =========================================================================
 
 namespace {
-    // 局面评估分值常量
-    const int SCORE_OPEN_FOUR  = 100000;  /**< 活四：极高威胁，近似必胜 */
-    const int SCORE_FOUR       = 10000;   /**< 冲四/眠四：需要对手立即防守 */
-    const int SCORE_OPEN_THREE = 5000;    /**< 活三：形成后可扩为活四 */
-    const int SCORE_THREE      = 800;     /**< 眠三：有一定攻击潜力 */
-    const int SCORE_OPEN_TWO   = 500;     /**< 活二：发展潜力的基础 */
-    const int SCORE_TWO        = 50;      /**< 眠二：微弱的攻击潜力 */
+    const int SCORE_OPEN_FOUR  = 100000;
+    const int SCORE_FOUR       = 10000;
+    const int SCORE_OPEN_THREE = 5000;
+    const int SCORE_THREE      = 800;
+    const int SCORE_OPEN_TWO   = 500;
+    const int SCORE_TWO        = 50;
+}
+
+int Board::scoreRun(int len, bool openBefore, bool openAfter) {
+    if (len >= 5 || len < 2) return 0;
+    int openCount = (openBefore ? 1 : 0) + (openAfter ? 1 : 0);
+    if (len == 4) return openCount == 2 ? SCORE_OPEN_FOUR : (openCount >= 1 ? SCORE_FOUR : 0);
+    if (len == 3) return openCount == 2 ? SCORE_OPEN_THREE : (openCount == 1 ? SCORE_THREE : 0);
+    if (len == 2) return openCount == 2 ? SCORE_OPEN_TWO : (openCount == 1 ? SCORE_TWO : 0);
+    return 0;
 }
 
 /**
- * @brief 评估某一方在当前局面的得分
+ * @brief 计算在 (x,y) 落一子对黑/白评分的增量
  *
- * 遍历棋盘四个方向（水平、垂直、两条对角线），对每个方向上
- * 连续同色棋子形成的"棋型"进行评分。棋型按连子数和两端开放情况
- * 分为：活四、冲四、活三、眠三、活二、眠二。
+ * 仅在 makeMove 前调用（此时 (x,y) 为空）。
+ * 对 4 个方向分别计算：
+ * - 己方连子扩展/合并导致的加分
+ * - 对方连子的开放端被阻挡导致的扣分
  *
- * 使用 visited 数组标记每个方向上已访问的连续棋子，避免重复计数。
- *
- * @param stone 要评估的棋子颜色
- * @return 该方局面的总评分
+ * @param deltaBlack [out] 黑方评分变化量
+ * @param deltaWhite [out] 白方评分变化量
  */
-int Board::evaluateColor(int stone) const {
-    if (stone == EMPTY) return 0;
-    int totalScore = 0;
+void Board::computeDelta(int x, int y, int stone, int& deltaBlack, int& deltaWhite) const {
+    deltaBlack = 0;
+    deltaWhite = 0;
+
     const int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
-    bool visited[SIZE][SIZE][4] = {false};          // [x][y][方向] 避免重复
+    int oppColor = -stone;
 
-    for (int x = 0; x < SIZE; ++x) {
-        for (int y = 0; y < SIZE; ++y) {
-            if (board[x][y] != stone) continue;
-            for (int d = 0; d < 4; ++d) {
-                if (visited[x][y][d]) continue;
-                int dx = dirs[d][0], dy = dirs[d][1];
+    for (auto& d : dirs) {
+        int dx = d[0], dy = d[1];
 
-                // 正方向统计连子数
-                int count = 1;
-                int nx = x + dx, ny = y + dy;
-                while (inBoard(nx, ny) && board[nx][ny] == stone) {
-                    ++count;
-                    nx += dx; ny += dy;
-                }
-                bool openEnd1 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
+        // ── 己方：左/右侧旧连子 + 新子合并 ──
+        int leftLen = 0, nx = x - dx, ny = y - dy;
+        while (inBoard(nx, ny) && board[nx][ny] == stone) { ++leftLen; nx -= dx; ny -= dy; }
+        bool leftOpen = inBoard(nx, ny) && board[nx][ny] == EMPTY;
 
-                // 反方向统计连子数
-                nx = x - dx; ny = y - dy;
-                while (inBoard(nx, ny) && board[nx][ny] == stone) {
-                    ++count;
-                    nx -= dx; ny -= dy;
-                }
-                bool openEnd2 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
+        int rightLen = 0;
+        nx = x + dx; ny = y + dy;
+        while (inBoard(nx, ny) && board[nx][ny] == stone) { ++rightLen; nx += dx; ny += dy; }
+        bool rightOpen = inBoard(nx, ny) && board[nx][ny] == EMPTY;
 
-                // 标记该连珠段所有棋子为已访问
-                int tx = x, ty = y;
-                while (inBoard(tx, ty) && board[tx][ty] == stone) {
-                    visited[tx][ty][d] = true;
-                    tx += dx; ty += dy;
-                }
-                tx = x - dx; ty = y - dy;
-                while (inBoard(tx, ty) && board[tx][ty] == stone) {
-                    visited[tx][ty][d] = true;
-                    tx -= dx; ty -= dy;
-                }
+        // 旧评分：左右两侧是分离的两个连子（内侧均以空位结束）
+        int oldSelfScore = 0;
+        if (leftLen >= 2)  oldSelfScore += scoreRun(leftLen,  leftOpen, true);
+        if (rightLen >= 2) oldSelfScore += scoreRun(rightLen, true, rightOpen);
 
-                // 五连及以上由胜负判定处理，此处跳过
-                if (count >= 5) continue;
+        // 新评分：合并后的一条连子
+        int newLen = leftLen + 1 + rightLen;
+        int newSelfScore = (newLen >= 2 && newLen < 5) ? scoreRun(newLen, leftOpen, rightOpen) : 0;
 
-                int openCount = (openEnd1 ? 1 : 0) + (openEnd2 ? 1 : 0);
+        int selfDelta = newSelfScore - oldSelfScore;
+        if (stone == BLACK) deltaBlack += selfDelta;
+        else                deltaWhite += selfDelta;
 
-                // 根据连子数和开放端数量评分
-                if (count == 4) {
-                    if (openCount == 2) totalScore += SCORE_OPEN_FOUR;   // 活四
-                    else if (openCount >= 1) totalScore += SCORE_FOUR;   // 冲四
-                } else if (count == 3) {
-                    if (openCount == 2) totalScore += SCORE_OPEN_THREE;  // 活三
-                    else if (openCount == 1) totalScore += SCORE_THREE;  // 眠三
-                } else if (count == 2) {
-                    if (openCount == 2) totalScore += SCORE_OPEN_TWO;    // 活二
-                    else if (openCount == 1) totalScore += SCORE_TWO;    // 眠二
-                }
-            }
-        }
+        // ── 对方：左右相邻的对方连子，其内侧开放端被阻挡 ──
+        auto handleOppRun = [&](int sideLen, bool outerOpen, bool isLeft) {
+            if (sideLen < 2 || sideLen >= 5) return 0;
+            // 旧评分：内侧开放端指向 (x,y) 空位
+            int oldScore = scoreRun(sideLen, isLeft ? outerOpen : true, isLeft ? true : outerOpen);
+            // 新评分：内侧被 stone 阻挡
+            int newScore = scoreRun(sideLen, isLeft ? outerOpen : false, isLeft ? false : outerOpen);
+            return newScore - oldScore;
+        };
+
+        // 左侧对方连子
+        int oppLeftLen = 0;
+        nx = x - dx; ny = y - dy;
+        while (inBoard(nx, ny) && board[nx][ny] == oppColor) { ++oppLeftLen; nx -= dx; ny -= dy; }
+        bool oppLeftOuterOpen = inBoard(nx, ny) && board[nx][ny] == EMPTY;
+        int oppLeftDelta = handleOppRun(oppLeftLen, oppLeftOuterOpen, true);
+        if (oppColor == BLACK) deltaBlack += oppLeftDelta;
+        else                   deltaWhite += oppLeftDelta;
+
+        // 右侧对方连子
+        int oppRightLen = 0;
+        nx = x + dx; ny = y + dy;
+        while (inBoard(nx, ny) && board[nx][ny] == oppColor) { ++oppRightLen; nx += dx; ny += dy; }
+        bool oppRightOuterOpen = inBoard(nx, ny) && board[nx][ny] == EMPTY;
+        int oppRightDelta = handleOppRun(oppRightLen, oppRightOuterOpen, false);
+        if (oppColor == BLACK) deltaBlack += oppRightDelta;
+        else                   deltaWhite += oppRightDelta;
     }
-    return totalScore;
 }
 
-void Board::evaluateBoth(int& blackScore, int& whiteScore) const {
-    blackScore = 0;
-    whiteScore = 0;
+/**
+ * @brief 全盘重新计算评分（全量，用于初始化及验证）
+ *
+ * 与旧 evaluateBoth 逻辑一致，遍历全部 225×4 个方向。
+ * 仅在 reset() 和调试时调用。
+ */
+void Board::fullRecalcScores() {
+    cachedBlackScore = 0;
+    cachedWhiteScore = 0;
     const int dirs[4][2] = {{1,0}, {0,1}, {1,1}, {1,-1}};
-
-    // 栈上分配的 visited 数组避免堆分配开销
     bool visited[SIZE][SIZE][4] = {false};
 
     for (int x = 0; x < SIZE; ++x) {
@@ -458,47 +484,22 @@ void Board::evaluateBoth(int& blackScore, int& whiteScore) const {
 
                 int count = 1;
                 int nx = x + dx, ny = y + dy;
-                while (inBoard(nx, ny) && board[nx][ny] == stone) {
-                    ++count;
-                    nx += dx; ny += dy;
-                }
+                while (inBoard(nx, ny) && board[nx][ny] == stone) { ++count; nx += dx; ny += dy; }
                 bool openEnd1 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
 
                 nx = x - dx; ny = y - dy;
-                while (inBoard(nx, ny) && board[nx][ny] == stone) {
-                    ++count;
-                    nx -= dx; ny -= dy;
-                }
+                while (inBoard(nx, ny) && board[nx][ny] == stone) { ++count; nx -= dx; ny -= dy; }
                 bool openEnd2 = inBoard(nx, ny) && board[nx][ny] == EMPTY;
 
                 int tx = x, ty = y;
-                while (inBoard(tx, ty) && board[tx][ty] == stone) {
-                    visited[tx][ty][d] = true;
-                    tx += dx; ty += dy;
-                }
+                while (inBoard(tx, ty) && board[tx][ty] == stone) { visited[tx][ty][d] = true; tx += dx; ty += dy; }
                 tx = x - dx; ty = y - dy;
-                while (inBoard(tx, ty) && board[tx][ty] == stone) {
-                    visited[tx][ty][d] = true;
-                    tx -= dx; ty -= dy;
-                }
+                while (inBoard(tx, ty) && board[tx][ty] == stone) { visited[tx][ty][d] = true; tx -= dx; ty -= dy; }
 
                 if (count >= 5) continue;
-
-                int openCount = (openEnd1 ? 1 : 0) + (openEnd2 ? 1 : 0);
-                int score = 0;
-                if (count == 4) {
-                    if (openCount == 2) score = SCORE_OPEN_FOUR;
-                    else if (openCount >= 1) score = SCORE_FOUR;
-                } else if (count == 3) {
-                    if (openCount == 2) score = SCORE_OPEN_THREE;
-                    else if (openCount == 1) score = SCORE_THREE;
-                } else if (count == 2) {
-                    if (openCount == 2) score = SCORE_OPEN_TWO;
-                    else if (openCount == 1) score = SCORE_TWO;
-                }
-
-                if (stone == BLACK) blackScore += score;
-                else whiteScore += score;
+                int sc = scoreRun(count, openEnd1, openEnd2);
+                if (stone == BLACK) cachedBlackScore += sc;
+                else                cachedWhiteScore += sc;
             }
         }
     }
